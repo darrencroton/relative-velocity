@@ -2,8 +2,6 @@
 
 Compute relative velocity statistics for close galaxy pairs from semi-analytic model outputs.
 
-> **Work in progress** — core pipeline is under active development. Results should be validated before use in publications.
-
 ## What it does
 
 Given a galaxy catalog with positions, velocities, and stellar masses at one or more redshift snapshots, this pipeline:
@@ -17,10 +15,13 @@ Given a galaxy catalog with positions, velocities, and stellar masses at one or 
 ## Quick start
 
 ```bash
-# Generate test data and run the full pipeline with validation plots
+# Generate test data, run calculation, plot with Maxwell-distribution validation overlays
 python pipeline.py --validate
 
-# Run calculation only (writes results to results/)
+# Generate test data then run the full pipeline
+python pipeline.py --generate-test
+
+# Run calculation only (data/ must exist)
 python pipeline.py --calc-only
 
 # Remake plots from existing results (no recalculation)
@@ -50,6 +51,14 @@ The pipeline takes all input values at face value:
 - **Stellar mass**: log10(M_star / M_sun)
 
 No cosmological unit conversions are applied. If your data uses different conventions (e.g. Mpc/h, comoving coordinates), handle the conversion in the data reader.
+
+## Tests
+
+```bash
+pytest tests/
+```
+
+80 tests covering pair-count geometry (Poisson formula, r³/N² scaling, periodic boundary), exact unit recovery (separation, velocity, mass/separation bin assignment), and statistical validation against analytical Maxwell-distribution predictions.
 
 ## Requirements
 
