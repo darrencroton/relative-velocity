@@ -11,10 +11,7 @@ redshift, converts them to merger rates via a parameterized merger
 timescale, propagates Poisson uncertainty throughout, and produces a
 redshift-evolution figure plus a table of results.
 
-This plan targets a **frontier/senior implementer profile**: the three
-slices are substantial, internally coupled (each slice's output is the next
-slice's input), and each is reviewable as one clear diff. Batching is
-offered for a strong implementer but not required.
+This plan targets a **frontier/senior implementer profile** under `project-manager` Mode B: the three slices are substantial, sequentially dependent (each slice's committed output is the next slice's input), independently gateable, and each is reviewable as one clear diff. Mode B must execute the slices atomically in plan order; there are no slice batches.
 
 This plan was reviewed across four rounds by an independent read-only
 delegate (Codex, `gpt-5.6-sol`, medium effort) before implementation.
@@ -26,6 +23,17 @@ and a few minor wording issues; round 4 closed the same class of gap in
 `merger_timescale_gyr`'s input domain and a `compute_merger_rate` wording
 mismatch. The version below reflects all four rounds. See the plan's Git
 history for prior versions if needed.
+
+A fifth independent read-only review was then completed with Claude Code's
+`opus` alias (Opus 5, high effort) after the plan was converted for Mode B.
+Its two major and eleven minor findings were assessed individually. The
+accepted findings added persisted mass-bin provenance checks, exact
+two-point-fit coverage, an explicit rate-error formula, headless plotting
+and log-errorbar behavior, frozen deferred CLI imports/help surfaces,
+reported fit exclusions, isolated fixture details, documentation deferral,
+and a rollback path consistent with the global archive rule. The suggestion
+to preserve an exact README test count was intentionally adapted instead:
+Slice 3 removes that brittle number and documents coverage qualitatively.
 
 ## Scientific Background
 
@@ -234,8 +242,11 @@ context. Summary of the method this plan implements:
   clear error naming the unsupported strategy otherwise —
   `"secondary"`/`"mean"`/`"total"` are all explicitly out of scope for
   this plan.
-- All new parameters live in `config.py`, passed explicitly — no
-  hardcoded constants in `merger_rate.py` or `calc.py`.
+- All tunable scientific parameters live in `config.py` and are passed
+  explicitly. Frozen filenames, plotting colors, the display-only
+  log-errorbar floor factor, and numerical defaults such as
+  `check_slope_consistency(..., n_sigma=3.0)` may remain local constants;
+  they are presentation/API choices rather than hidden scientific inputs.
 - Fail loud: an inconsistent state — a mass bin with `n_pairs[b] > 0` but
   `n_galaxies_per_mass_bin[b] == 0` (a pair can't exist in a bin with zero
   galaxies) — raises a clear assertion error. A bin with both `n_pairs[b]
@@ -250,24 +261,17 @@ context. Summary of the method this plan implements:
   this plan does not resolve that either — outputs are labeled
   `Gyr^-1 Mpc^-3` without an unqualified "comoving" claim.
 
-## Implementation Profiles
+## Implementation Profile and Execution Order
 
-- Recommended for frontier/senior implementer: slices may be run
-  individually (default, checkpointed) or as `Batch A` (Slices 1-2) then
-  Slice 3 separately, since Slice 3's plotting/validation is naturally
-  reviewed on its own once the numeric core is settled.
-- Recommended for standard implementer: run slices individually.
-- Recommended for weaker implementer: run atomic slices one at a time,
-  do not batch.
+- Run this plan with `project-manager` Mode B using a frontier/senior Developer profile. Execute Slices 1, 2, and 3 atomically in that order; do not combine commits or reviews across slice boundaries.
+- Every slice has `Independent audit required: yes`. After the Developer commits the slice, the PM must commission the Mode B elevated-risk `drift-audit` and `code-review` passes sequentially against that exact final commit, in addition to rerunning the slice's validation itself.
+- Slice 2 may assume accepted Slice 1 state, and Slice 3 may assume accepted Slices 1-2 state. No slice may repair an earlier accepted slice silently: if a prerequisite defect is discovered, stop and return it for an explicit plan decision rather than broadening the current slice.
 
-## Slice Batches
+## Test Isolation and Shared Fixtures
 
-- Batch A: Slices 1-2 — both are pure numeric/data-schema work (no
-  plotting, no CLI), share the same test file, and a strong implementer
-  can reasonably complete and review them as one coherent diff. Slice 3
-  (plotting + CLI wiring + the redshift-evolution sanity check) should
-  always be reviewed separately since it is the slice with the sharpest
-  scientific-judgment risk (see point 6 above).
+- Tests added in `tests/test_merger_rate.py` must use a copied config whose `data_dir`, `results_dir`, and `figures_dir` point beneath pytest's `tmp_path`/`tmp_path_factory`; tests must not read, overwrite, or depend on the repository's gitignored `data/`, `results/`, or `figures/` contents.
+- The generated-mock integration setup must call `generate_all_snapshots(config)` and `run_calculation(config)` directly with those temporary directories. It may be module-scoped so the four-snapshot generation/pair-finding setup is shared across the Slice 1-3 integration tests. References below to "generated mock data" mean this isolated fixture, not shelling out to two mutually exclusive CLI modes.
+- CLI behavior is validated separately: unit tests may patch `sys.argv`/module call sites, while the explicit end-to-end command in Slice 3 remains a post-test validation command run from the repository root.
 
 ---
 
@@ -278,11 +282,14 @@ context. Summary of the method this plan implements:
   mass-selected galaxies in each of the existing mass bins and write it as
   a new dataset `n_galaxies_per_mass_bin` (1D int array, length = number
   of mass bins) in each `results/pairs_z{z}.hdf5` file written by
-  `_save_pairs`. Also add a new attr `box_size_mpc` (float) to each results
-  file, set to `catalog["box_size"]` for that redshift — the same value
-  `pair_finder.find_pairs` actually used for periodicity — so downstream
-  volume calculations in Slice 2 do not have to assume it matches
-  `config["box_size"]`. Both additions are purely additive: existing
+  `_save_pairs`. Also add two attrs to each results file:
+  `box_size_mpc` (float), set to `catalog["box_size"]` for that redshift —
+  the same value `pair_finder.find_pairs` actually used for periodicity —
+  and `mass_bin_edges` (1D float array), set from the local
+  `_mass_bin_edges(config)` used for the new denominator. These attrs let
+  Slice 2 verify that the live config still matches the persisted artifact
+  before calculating volumes or labeling bins. All three additions are
+  purely additive: existing
   datasets (`mass_primary`, `mass_secondary`, `mass_ratio`,
   `separation_kpc`, `delta_v`, `mass_bin`, `sep_bin`) and existing attrs
   are unchanged.
@@ -294,6 +301,18 @@ context. Summary of the method this plan implements:
   counting logic into a small, directly testable helper,
   `_count_galaxies_per_mass_bin(log_stellar_mass, config)` in `calc.py`,
   returning a 1D int array of length `n_mass_bins`.
+- Add a local `calc._mass_bin_edges(config)` helper with the same formula
+  as the existing private helpers in `pair_finder.py` and `plot.py`;
+  `_count_galaxies_per_mass_bin` and `_save_pairs` both use this single
+  local definition.
+- Change `_save_pairs`'s contract to
+  `_save_pairs(pairs, n_galaxies_per_mass_bin, box_size_mpc, filepath, z,
+  config)`. `run_calculation` passes the count array returned by
+  `_count_galaxies_per_mass_bin` and the same
+  `catalog["box_size"]` supplied to `find_pairs`; `_save_pairs` writes those
+  values and does not recompute either from the pair catalog or
+  `config["box_size"]`; `_save_pairs` writes `mass_bin_edges` directly
+  from its config using the local helper.
 - **Bin-edge convention must match `pair_finder._assign_mass_bins`
   exactly**: use the same `np.digitize`-based, right-open bin logic
   (locally reimplemented per the existing duplication convention), where a
@@ -326,12 +345,24 @@ context. Summary of the method this plan implements:
     read directly from the `n_galaxies_per_mass_bin` dataset, and
     `box_size_mpc` is read from the new attr. The two count arrays are
     returned as 1D int arrays of length `n_mass_bins`, in bin-index order.
+    Fail loudly with a clear assertion if the file is missing; any required
+    dataset/attr is absent; `mass_bin` is not a 1D integer-valued array;
+    `n_galaxies_per_mass_bin` is not a 1D, non-negative, integer-valued
+    array of exactly `n_mass_bins` entries; or `box_size_mpc` is not a
+    finite positive scalar. `mass_bin == -1` remains a valid existing
+    out-of-range sentinel and is not counted; any other bin index outside
+    `[-1, n_mass_bins - 1]` is malformed and must raise rather than be
+    silently ignored.
   - `compute_pair_fraction(n_pairs, n_galaxies)` — vectorized over the
     mass-bin array; returns `(f_pair, sigma_f_pair)` per the formulas in
-    points 2/5 above. Must assert `n_galaxies[b] > 0` for every bin with
-    `n_pairs[b] > 0` (a pair can't exist in a bin with zero galaxies) with
-    a clear message; bins where both are zero are valid and yield
-    `f_pair = 0, sigma_f_pair = 0`.
+    points 2/5 above. Both inputs must be 1D, have identical shape, and
+    contain only finite, non-negative, integer-valued counts; malformed
+    inputs raise a clear assertion instead of broadcasting, truncating, or
+    producing `NaN`. Must also assert `n_galaxies[b] > 0` for every bin
+    with `n_pairs[b] > 0` (a pair can't exist in a bin with zero galaxies)
+    with a clear message; bins where both are zero are valid and yield
+    `f_pair = 0, sigma_f_pair = 0`. Returned arrays are floating point and
+    have the same shape as the inputs.
 
 ### Acceptance Criteria
 - Inputs: `config` dict (existing keys; this slice's functions are
@@ -339,14 +370,16 @@ context. Summary of the method this plan implements:
   Slice 2); on-disk `results/pairs_z{z}.hdf5` files as written by the
   modified `calc.py`.
 - Outputs: modified `results/pairs_z{z}.hdf5` files containing the new
-  `n_galaxies_per_mass_bin` dataset and `box_size_mpc` attr;
+  `n_galaxies_per_mass_bin` dataset and `box_size_mpc` /
+  `mass_bin_edges` attrs;
   `merger_rate.py` exposing `_mass_bin_edges`, `_results_path`,
   `_load_pair_counts`, `compute_pair_fraction` as importable functions;
-  `calc.py` exposing `_count_galaxies_per_mass_bin` as an importable,
-  directly testable function.
+  `calc.py` exposing `_mass_bin_edges` and
+  `_count_galaxies_per_mass_bin` as importable, directly testable
+  functions.
 - User-visible behaviour: running `python src/pipeline.py --calc-only`
   (or `--validate`/`--generate-test`) produces results files with two
-  additional pieces of data (one dataset, one attr); no change to console
+  additional attr values plus one additional dataset; no change to console
   output, plots, or existing datasets/attrs.
 - Behaviour that must not change: `plot.py`'s existing figures and stats
   table; all existing tests in `tests/test_geometric.py`,
@@ -359,7 +392,8 @@ context. Summary of the method this plan implements:
   - `src/merger_rate.py` (new file)
   - `tests/test_merger_rate.py` (new file)
 - Functions/classes/components allowed to change:
-  - `calc.py`: `_save_pairs` (add the two new writes), new
+  - `calc.py`: `_save_pairs` (accept the frozen expanded signature and add
+    the three additive schema writes), new `_mass_bin_edges` helper, new
     `_count_galaxies_per_mass_bin` helper, `run_calculation` (call the new
     helper and pass its output through to `_save_pairs`)
   - `merger_rate.py`: new module — `_mass_bin_edges`, `_results_path`,
@@ -391,7 +425,7 @@ context. Summary of the method this plan implements:
   *only* the current dataset set (confirmed: no test in `tests/` opens
   these HDF5 files directly).
 - Approval needed before implementation: no
-- Independent audit required: no
+- Independent audit required: yes
 
 ### Validation Plan
 - Tests to add/update (new file `tests/test_merger_rate.py`, following the
@@ -404,6 +438,9 @@ context. Summary of the method this plan implements:
   - Assertion failure is raised when `n_galaxies[b] == 0` and
     `n_pairs[b] > 0` for some `b` (construct this inconsistent input
     directly; do not rely on real data producing it).
+  - `compute_pair_fraction` rejects mismatched shapes, non-1D inputs,
+    negative counts, non-finite counts, and non-integer-valued counts
+    instead of relying on NumPy broadcasting or coercion.
   - `_count_galaxies_per_mass_bin` (direct unit test, not just via a
     fixture): build a small synthetic array of `log_stellar_mass` values
     analogous to `tests/test_pair_finder.py`'s hand-crafted-catalog style,
@@ -415,27 +452,37 @@ context. Summary of the method this plan implements:
     running `calc.py` on a tiny synthetic catalog analogous to
     `tests/test_pair_finder.py`'s `_catalog()` helper) recovers known
     `n_pairs_per_bin`, `n_galaxies_per_mass_bin`, and `box_size_mpc`
-    values.
+    values; the fixture also contains the required `mass_bin_edges` and
+    existing `mass_bin_by` provenance attrs that Slice 2 will validate.
+  - `_load_pair_counts` rejects at least: a wrong-length
+    `n_galaxies_per_mass_bin`, an invalid `mass_bin` value outside
+    `[-1, n_mass_bins - 1]`, and a non-finite/non-positive
+    `box_size_mpc`. Include `mass_bin == -1` in the valid fixture and prove
+    it is excluded from `n_pairs_per_bin`.
   - `run_merger_rate_calculation`'s (Slice 2) or an equivalent entry
     point's assertion on `mass_bin_by != "primary"` is deferred to Slice 2
     since that's where the entry point is introduced; this slice only
     needs `_count_galaxies_per_mass_bin` and `compute_pair_fraction` to be
     correct in isolation, so no `mass_bin_by` test is required here.
-- Commands to run: `pytest tests/` (must remain 80+ passed, 0 failed);
-  `python src/pipeline.py --validate` (must complete without error and
+- Commands to run: `venv/bin/python -m pytest tests/` (must remain 80+
+  passed, 0 failed); `venv/bin/python src/pipeline.py --validate` (must
+  complete without error and
   produce unchanged figures).
 - Manual checks: open one regenerated `results/pairs_z2.0.hdf5` with
   `h5py` and confirm `n_galaxies_per_mass_bin` is present with length equal
   to the number of mass bins (every value a non-negative integer), and
-  `box_size_mpc` matches `config["box_size"]` for the current test data.
+  `box_size_mpc` / `mass_bin_edges` match the current test-data catalog and
+  config respectively.
 
 ### Rollback Path
 - Revert `src/calc.py` to drop the new dataset/attr writes; move
-  `src/merger_rate.py` and `tests/test_merger_rate.py` to `archive/`
-  (per repository convention: never delete outright, archive instead — do
-  not `git revert` the introducing commit, since that would remove the
-  files outright rather than archive them). No other files touched, so
-  this is a clean single-slice rollback.
+  `src/merger_rate.py` and `tests/test_merger_rate.py` to a named
+  `archive/merger-rate-slice1/` subtree rather than deleting them. Treat
+  rollback as a separately approved change whose authorized surface also
+  includes those archive paths and `.gitignore`; add `archive/` to
+  `.gitignore` if absent, as required by the global archive convention.
+  Do not rewrite history or use a revert that transiently deletes the new
+  files.
 
 ---
 
@@ -457,6 +504,10 @@ context. Summary of the method this plan implements:
   - `merger_fraction = 0.6` — fraction of close pairs that merge within
     `T_merge` (`C_merge` in the literature).
 - Add to `src/merger_rate.py`:
+  - `_merger_rate_results_path(config)` — returns
+    `os.path.join(config["results_dir"], "merger_rate.hdf5")`; Slice 2
+    writes and Slice 3 reads this shared path helper so the combined output
+    filename is defined once.
   - `merger_timescale_gyr(z, config)` — implements
     `T_merge(z) = merger_timescale_gyr0 * (1 + z) ** merger_timescale_alpha`.
     Must assert, on every call: `merger_timescale_gyr0` is finite and `> 0`;
@@ -472,17 +523,45 @@ context. Summary of the method this plan implements:
   - `compute_merger_rate(f_pair, sigma_f_pair, n_galaxies, box_size_mpc,
     timescale_gyr, merger_fraction)` — vectorized over the mass-bin array
     for one redshift; implements points 4/5 above exactly, returning
-    `(rate, sigma_rate)` in `Gyr^-1 Mpc^-3`. Must assert
-    `0 < merger_fraction <= 1`, that `box_size_mpc` is finite and `> 0`
+    `(rate, sigma_rate)` in `Gyr^-1 Mpc^-3`, with both outputs floating
+    point arrays matching the input array shape. `f_pair`,
+    `sigma_f_pair`, and `n_galaxies` must be 1D arrays of identical shape;
+    all values must be finite and non-negative; and `n_galaxies` must be
+    integer-valued. A bin with `n_galaxies == 0` must also have
+    `f_pair == sigma_f_pair == 0`; any other combination is inconsistent
+    and raises. These checks prevent silent NumPy broadcasting or invalid
+    independent calls. Compute
+    `sigma_rate = merger_fraction * sigma_f_pair * n_galaxies /
+    (box_size_mpc**3 * timescale_gyr)`: this equals
+    `rate / sqrt(N_pairs)` for non-empty bins without requiring
+    `N_pairs` in the helper signature, and preserves the frozen exact-zero
+    uncertainty when `sigma_f_pair == 0`. Must assert `merger_fraction` is a finite scalar
+    satisfying `0 < merger_fraction <= 1`, that `box_size_mpc` is a finite
+    scalar and `> 0`
     (explicitly finite, not just positive — `box_size_mpc = inf` must be
     rejected the same way `timescale_gyr = inf` already is, per the
-    Validation Plan below), and that `timescale_gyr` is finite and `> 0` —
-    this function is documented as independently callable and must not
-    assume its caller already validated either input.
+    Validation Plan below), and that `timescale_gyr` is a finite scalar
+    and `> 0` — this function is documented as independently callable and
+    must not assume its caller already validated any input.
   - `run_merger_rate_calculation(config)` — asserts
     `config["mass_bin_by"] == "primary"` first (see Architecture Fit),
-    raising a clear error naming the actual value otherwise. Then, for
-    each `z` in `config["redshifts"]`, calls `_load_pair_counts`,
+    raising a clear error naming the actual value otherwise. Before
+    loading any snapshot or opening the combined output for writing,
+    preflight every `_results_path(z, config)` and raise a clear missing-file
+    assertion naming the first absent path; a failed preflight must leave
+    any pre-existing `merger_rate.hdf5` untouched. As a second pre-write
+    provenance gate, open every pair-results file and require: its recorded
+    `redshift` equals the configured `z` selected by that path; its existing
+    `mass_bin_by` attr equals both `"primary"` and the live config value;
+    its `mass_ratio_min` and `max_sep_kpc` attrs equal the corresponding
+    live config values; and its Slice 1 `mass_bin_edges` attr exactly
+    matches `_mass_bin_edges(config)` in shape and value. Numeric provenance
+    values must also be finite. A missing/mismatched attr raises a clear
+    assertion naming the file and recorded/current values; failure also
+    leaves any pre-existing combined output untouched. This prevents a
+    stale or mislabeled pair artifact from being silently reinterpreted
+    after the config changes. Then, for each `z` in
+    `config["redshifts"]`, calls `_load_pair_counts`,
     `compute_pair_fraction`, `merger_timescale_gyr`, `compute_merger_rate`
     (passing the per-redshift `box_size_mpc` read from that results file,
     not `config["box_size"]`); assembles arrays over
@@ -494,18 +573,19 @@ context. Summary of the method this plan implements:
     `box_size_mpc` (the per-redshift box size actually used for that
     row's rate calculation, persisted here so the combined file is
     independently auditable without re-opening every `pairs_z{z}.hdf5`),
-    and attrs: `redshifts`, `mass_bin_edges`, `merger_fraction`,
+    and attrs: `redshifts`, `mass_bin_edges`, `mass_bin_by`,
+    `mass_ratio_min`, `max_sep_kpc`, `merger_fraction`,
     `merger_timescale_gyr0`, `merger_timescale_alpha`, `timestamp` —
     mirroring the provenance-attrs pattern already used in `calc.py`'s
-    `_save_pairs`.
-  - Fail loud: `run_merger_rate_calculation` asserts each required
-    `results/pairs_z{z}.hdf5` file exists before starting, with the same
-    style of message `calc.py` already uses for its own missing-file case.
+    `_save_pairs`. Use `_merger_rate_results_path(config)` for the output
+    location and create `config["results_dir"]` if needed (normally it
+    already exists because the preflighted pair files live there).
 
 ### Acceptance Criteria
 - Inputs: `config` dict including the three new parameters
   (`mass_bin_by` must be `"primary"`); on-disk `results/pairs_z{z}.hdf5`
-  files (with `n_galaxies_per_mass_bin`/`box_size_mpc` from Slice 1) for
+  files (with `n_galaxies_per_mass_bin`, `box_size_mpc`, and
+  `mass_bin_edges` from Slice 1) for
   every redshift in `config["redshifts"]`.
 - Outputs: `results/merger_rate.hdf5` with the datasets/attrs listed
   above; `merger_timescale_gyr` and `compute_merger_rate` importable and
@@ -523,7 +603,8 @@ context. Summary of the method this plan implements:
 - Functions/classes/components allowed to change:
   - `config.py`: add the three new keys only; do not alter any existing
     key's value or meaning
-  - `merger_rate.py`: new `merger_timescale_gyr`, `compute_merger_rate`,
+  - `merger_rate.py`: new `_merger_rate_results_path`,
+    `merger_timescale_gyr`, `compute_merger_rate`,
     `run_merger_rate_calculation`; Slice 1's functions may be called but
     not modified in this slice unless a genuine defect is found (report it
     rather than silently patching it in this slice's diff)
@@ -540,6 +621,10 @@ context. Summary of the method this plan implements:
   a single global config value in this plan, not mass- or
   redshift-dependent (a real extension, but out of scope here).
 - No support for `mass_bin_by` strategies other than `"primary"`.
+- Documentation of the three new public config keys is deliberately
+  deferred to Slice 3, where all user-facing merger-rate behavior is
+  documented together; its absence from `README.md`/`AGENTS.md` in the
+  accepted Slice 2 state is not a defect.
 
 ### Risk Flags
 - Risky surfaces touched: introduces a new persistent output file
@@ -548,7 +633,7 @@ context. Summary of the method this plan implements:
   existing one (Slice 1's additive change to `results/pairs_z{z}.hdf5` is
   the only existing-file schema touched, and was already reviewed there).
 - Approval needed before implementation: no
-- Independent audit required: no
+- Independent audit required: yes
 
 ### Validation Plan
 - Tests to add/update (append to `tests/test_merger_rate.py`):
@@ -562,22 +647,38 @@ context. Summary of the method this plan implements:
     `merger_timescale_alpha = nan`/`inf` — covering the same
     finite-and-in-domain contract `fit_log_rate_vs_redshift` enforces for
     redshift elsewhere in this plan, not just the non-positive cases.
-  - `compute_merger_rate` on hand-crafted scalars (pick `f_pair`,
+  - `compute_merger_rate` on hand-crafted one-element arrays (pick `f_pair`,
     `sigma_f_pair`, `n_galaxies`, `box_size_mpc`, `timescale_gyr`,
     `merger_fraction` such that the arithmetic is easy to verify by hand)
     recovers the exact expected `rate` and `sigma_rate`.
   - `compute_merger_rate` raises on `merger_fraction <= 0`,
-    `merger_fraction > 1`, `box_size_mpc <= 0`, `box_size_mpc = inf`,
-    `box_size_mpc = nan`, `timescale_gyr <= 0`, `timescale_gyr = nan`, and
+    `merger_fraction > 1`, non-finite `merger_fraction`,
+    `box_size_mpc <= 0`, `box_size_mpc = inf`, `box_size_mpc = nan`,
+    `timescale_gyr <= 0`, `timescale_gyr = nan`, and
     `timescale_gyr = inf` — both the non-positive and the non-finite cases
     must be covered for both inputs, not just non-positive.
+  - `compute_merger_rate` rejects mismatched/non-1D array inputs, negative
+    or non-finite array values, non-integer-valued `n_galaxies`, and a bin
+    with `n_galaxies == 0` but nonzero `f_pair` or `sigma_f_pair`.
   - `run_merger_rate_calculation` raises a clear error when
     `config["mass_bin_by"] != "primary"` (construct a config copy with,
     e.g., `mass_bin_by = "mean"`).
+  - Persisted-provenance gate: with a live config using `"primary"`,
+    parameterize fixtures with a mismatched recorded `redshift`,
+    `mass_bin_by`, `mass_ratio_min`, `max_sep_kpc`, or `mass_bin_edges`
+    (for the edge case, keep the same number of bins but change their
+    values). Each case raises clearly and leaves a sentinel pre-existing
+    combined output byte-for-byte unchanged.
+  - Missing-file preflight: create all but one configured pair-results
+    fixture plus a sentinel pre-existing `merger_rate.hdf5`; assert
+    `run_merger_rate_calculation` raises before reading/writing output and
+    the sentinel file is byte-for-byte unchanged.
   - **Box-size provenance test (proves the per-file value is actually
     used, not `config["box_size"]`):** build a small hand-written
     `results/pairs_z{z}.hdf5`-shaped fixture (reusing the Slice 1 fixture
-    approach) whose `box_size_mpc` attr is deliberately set to a value
+    approach), using a config copy whose `redshifts` contains only the
+    snapshot(s) for which fixtures were written, whose `box_size_mpc` attr
+    is deliberately set to a value
     that **differs** from `config["box_size"]` (e.g. fixture uses `250.0`
     while `config["box_size"]` is left at its default `500.0`), run
     `compute_merger_rate`/`run_merger_rate_calculation` against it, and
@@ -587,19 +688,24 @@ context. Summary of the method this plan implements:
     reads `config["box_size"]` instead of the per-file attr would produce
     a detectably different, wrong rate under this test and must fail it.
   - `run_merger_rate_calculation` end-to-end on the real generated test
-    data (after `--generate-test` + `--calc-only`): asserts
+    data from the isolated shared fixture: asserts
     `results/merger_rate.hdf5` exists, has the expected dataset shapes
-    `(len(config["redshifts"]), n_mass_bins)`, and that every
-    `merger_rate` value is finite and `>= 0`.
-- Commands to run: `pytest tests/` (0 failed).
+    `(len(config["redshifts"]), n_mass_bins)`, contains every required
+    dataset/attribute named in the frozen schema, stores integer
+    `n_pairs`/`n_galaxies`, preserves the configured redshift and mass-bin
+    ordering and pair-selection provenance, and has finite non-negative
+    `merger_rate` and `merger_rate_err` values.
+- Commands to run: `venv/bin/python -m pytest tests/` (0 failed).
 - Manual checks: inspect `results/merger_rate.hdf5` attrs with `h5py` and
   confirm `merger_fraction`, `merger_timescale_gyr0`,
-  `merger_timescale_alpha` match the values in `config.py`.
+  `merger_timescale_alpha`, `mass_bin_by`, `mass_ratio_min`, and
+  `max_sep_kpc` match the values in `config.py`.
 
 ### Rollback Path
 - Revert the three new `config.py` keys and the Slice 2 additions to
   `src/merger_rate.py`/`tests/test_merger_rate.py`. Slice 1's
-  `n_galaxies_per_mass_bin`/`box_size_mpc` additions and functions are
+  `n_galaxies_per_mass_bin`/`box_size_mpc`/`mass_bin_edges` additions and
+  functions are
   unaffected and can remain in place independently.
 
 ---
@@ -611,10 +717,9 @@ context. Summary of the method this plan implements:
   - `fit_log_rate_vs_redshift(rates, rate_errs, redshifts)` — operates on
     a **single mass bin's** 1D array-like inputs (`rates`, `rate_errs`, one
     value per redshift in `config["redshifts"]`; all three the same
-    length; raise if the three input lengths differ). Higher-dimensional
-    input is out of scope/undefined by this contract — the only caller,
-    `print_merger_rate_table`, only ever passes genuinely 1D per-redshift
-    arrays, so no additional shape validation is required. Fits
+    shape). Convert inputs to NumPy arrays and raise clearly unless every
+    input is 1D and their shapes are identical; do not flatten,
+    broadcast, or accept higher-dimensional inputs. Fits
     `log10(rate)` vs `log10(1 + z)` by weighted least squares (weights
     `1 / sigma_log_rate^2`, propagating `sigma_rate` to log space via
     `sigma_log_rate = sigma_rate / (rate * ln(10))`).
@@ -656,13 +761,21 @@ context. Summary of the method this plan implements:
     weighted-fit helpers). Returns `(slope, slope_err, intercept,
     n_excluded)` for this one bin. The caller (`print_merger_rate_table`)
     loops over mass bins and calls this once per bin — this function
-    itself has no knowledge of mass bins.
+    itself has no knowledge of mass bins. The exactly-two-usable-points
+    case is valid and must return a finite unscaled-covariance fit:
+    `numpy.polyfit(..., cov=True)` is specifically unsuitable there because
+    it attempts residual-based covariance scaling with zero residual
+    degrees of freedom, while `cov="unscaled"` or explicit normal
+    equations satisfies this contract.
   - `check_slope_consistency(slope, slope_err, expected_slope,
     n_sigma=3.0)` — returns `True` if
     `abs(slope - expected_slope) < n_sigma * slope_err`, `False`
-    otherwise, and `False` (not an error) if `slope` is `nan` (the
-    insufficient-data case must be treated as "check not applicable", and
-    the caller must report it as such rather than as a pass or fail).
+    otherwise. It returns `False` (not an error) if `slope`, `slope_err`,
+    or `expected_slope` is non-finite, or if `slope_err <= 0`; the
+    insufficient-data `nan` case must be treated as "check not
+    applicable", and the caller must report it as such rather than as a
+    pass or fail. Assert that `n_sigma` is finite and `> 0` so an invalid
+    threshold cannot fabricate a pass.
     `expected_slope` is always `-config["merger_timescale_alpha"]` for
     this plan's use (see point 6 above) — the function itself is generic
     and takes it as a parameter rather than hardcoding it, so it stays
@@ -672,11 +785,26 @@ context. Summary of the method this plan implements:
     produces `figures/merger_rate_evolution.png`: one panel, log-log axes,
     one line + errorbars per mass bin (`rate` vs `1 + z`). `rate == 0` is a
     valid value (an empty bin, per point 5) but has no representation on a
-    log axis — for a given mass bin, redshift points with `rate <= 0` must
-    simply be masked out of that bin's plotted line/errorbars (not passed
-    to the plotting call at all), the same exclusion `fit_log_rate_vs_redshift`
-    already applies; do not let matplotlib silently drop or warn about
-    them, and do not crash on `log10(0)`. Define a local
+    log axis — for a given mass bin, apply the same usability mask as the
+    fit (`rate` finite and `> 0`, `rate_err` finite and `> 0`) before the
+    plotting call. Unusable points must not be passed to Matplotlib at all;
+    if a mass bin has no usable points, skip its line/errorbar call without
+    error. Because the symmetric plug-in uncertainty has
+    `rate_err == rate` when `N_pairs == 1`, define a display-only positive
+    floor at `0.1 * min(all usable rates)` when at least one usable point
+    exists. Construct asymmetric plotting errors with the upper error
+    unchanged and each lower endpoint set to
+    `max(rate - rate_err, display_floor)`; annotate the figure when any
+    lower bar is clipped so the visualization is not mistaken for the raw
+    symmetric interval. Stored/printed scientific values remain unchanged.
+    If no usable point exists anywhere, write the labeled empty figure
+    without computing a floor. Do not let Matplotlib silently drop/warn
+    about invalid log-axis values, and do not crash on `log10(0)`.
+    `merger_rate.py` must call
+    `matplotlib.use("Agg")` before importing `pyplot`, matching
+    `plot.py`'s non-interactive convention. Create
+    `config["figures_dir"]` if necessary. Read the combined input through
+    `_merger_rate_results_path(config)`. Define a local
     `MASS_COLORS` constant in `merger_rate.py` (duplicated from `plot.py`'s
     palette, per the existing duplication convention noted in Architecture
     Fit) rather than importing it from `plot.py` — this keeps
@@ -688,9 +816,10 @@ context. Summary of the method this plan implements:
     as `plot.py`'s `print_stats_table`) of `f_pair`, `N_pairs`, `N_gal`,
     `rate`, `sigma_rate` per `(mass_bin, redshift)`, followed by one line
     per mass bin reporting the fitted slope, its uncertainty, the
-    `expected_slope` value, and whether `check_slope_consistency` passed
+    `expected_slope` value, `n_excluded`, and whether
+    `check_slope_consistency` passed
     (or "insufficient data" if `slope` was `nan`) — explicitly labeled in
-    the printed output as verifying **recovery of the merger-timescale
+    the printed output as verifying **mock-data recovery of the merger-timescale
     model's known injected power law**, not a real merger-rate evolution
     claim about the universe (the printed label text itself must make
     this distinction).
@@ -707,13 +836,25 @@ context. Summary of the method this plan implements:
   `--calc-only`/`--plot-only`/`--generate-test`/`--validate`, analogous to
   how `--validate` augments the plotting step). When set, `main()` calls
   `run_merger_rate_analysis(config)` after the existing calc/plot logic,
-  which itself asserts (fail loud, same style as `calc.py`) that
+  importing it inside `main()` only when needed, matching the existing
+  deferred-import pattern for generation/calculation/plotting and avoiding
+  a Matplotlib import for unrelated invocations or `--help`. The called
+  merger-rate calculation asserts (fail loud, same style as `calc.py`) that
   `results/pairs_z{z}.hdf5` exists for every configured redshift before
   proceeding — matching the existing `--plot-only` precedent of requiring
   prior results.
-- Update `README.md` and `AGENTS.md`/`docs/PLAN.md` (docs only) to mention
-  the new `--merger-rate` flag and `merger_rate.py` module, following the
-  existing documentation style for each file.
+- Freeze the flag-composition behavior so the implementer does not
+  reinterpret "additive": `--merger-rate` alone follows the existing
+  default calculation + plotting path and then runs merger-rate analysis
+  (so it needs input catalogs but not pre-existing pair-result files);
+  `--calc-only --merger-rate` recalculates pairs, skips the existing
+  velocity plots, then runs merger-rate analysis; `--plot-only
+  --merger-rate` uses pre-existing pair results for both plotting paths;
+  and `--generate-test --merger-rate` / `--validate --merger-rate`
+  generate fresh catalogs and pair results before the new analysis.
+- Update `README.md`, `AGENTS.md`, and `docs/PLAN.md` as scoped below so
+  command behavior, the new module/output, configuration keys, architecture,
+  and units do not become stale.
 
 ### Acceptance Criteria
 - Inputs: on-disk `results/pairs_z{z}.hdf5` files for every configured
@@ -725,11 +866,13 @@ context. Summary of the method this plan implements:
   `figures/merger_rate_evolution.png`; console table via
   `print_merger_rate_table`; updated `README.md`/`AGENTS.md`/`docs/PLAN.md`.
 - User-visible behaviour: `python src/pipeline.py --merger-rate` (after a
-  prior `--calc-only` or `--validate` run has produced
-  `results/pairs_z{z}.hdf5` files) produces the new figure and prints the
-  table, ending with the same `"Done."` message pattern as the rest of
-  `pipeline.py`. `python src/pipeline.py --validate --merger-rate` runs the
-  full existing pipeline plus this analysis in one invocation.
+  data-generating run has produced input catalogs in `data/`) follows the
+  normal calculation + plotting path, then produces the new HDF5 result,
+  figure, and table, ending with the same `"Done."` message pattern as the
+  rest of `pipeline.py`. `python src/pipeline.py --plot-only
+  --merger-rate` is the mode that requires pre-existing pair-result files.
+  `python src/pipeline.py --validate --merger-rate` runs the full existing
+  pipeline plus this analysis in one invocation.
 - Behaviour that must not change: `--calc-only`, `--plot-only`,
   `--generate-test`, `--validate` behave exactly as before when
   `--merger-rate` is not passed.
@@ -746,15 +889,25 @@ context. Summary of the method this plan implements:
   - `merger_rate.py`: new `fit_log_rate_vs_redshift`,
     `check_slope_consistency`, `plot_merger_rate_evolution`,
     `print_merger_rate_table`, `run_merger_rate_analysis`, local
-    `MASS_COLORS` constant
+    `MASS_COLORS` constant, non-interactive Matplotlib backend setup
   - `pipeline.py`: `parse_args` (add `--merger-rate`), `main` (call
-    `run_merger_rate_analysis` when set)
+    `run_merger_rate_analysis` when set), the module usage docstring, and
+    affected flag help strings. The new flag's help must say that it writes
+    its own combined result file and figure even when composed with
+    `--calc-only`/`--plot-only`, so those modes' short descriptions are not
+    misleading.
   - `README.md`: add a `--merger-rate` bullet to the "Quick start" command
-    block, and a short module description near "Configuration" or a new
-    small subsection; do not otherwise rewrite existing sections
+    block; extend "What it does" with the optional merger-rate product;
+    document the three new configuration keys and the new
+    `results/merger_rate.hdf5` / `figures/merger_rate_evolution.png`
+    outputs; replace the brittle exact test count in the Tests section with
+    a qualitative coverage statement that includes the new merger-rate
+    tests; do not otherwise rewrite existing sections
   - `AGENTS.md`: add `--merger-rate` to the "Running the Pipeline" command
-    block, and mention `merger_rate.py` in the "Architecture" module list;
-    do not otherwise rewrite existing sections
+    block; update the Architecture count, diagram, and module descriptions
+    for `merger_rate.py`; add the new timescale/rate units and the three
+    new keys to the Configuration Reference; do not otherwise rewrite
+    existing sections
   - `docs/PLAN.md`: append `merger_rate.py` to the "File Structure" diagram
     only; do not edit any other section of this historical planning
     document
@@ -776,7 +929,7 @@ context. Summary of the method this plan implements:
   flag, existing flags' behaviour unchanged; low risk but flagged per the
   "risky surfaces" checklist since it is a CLI contract change).
 - Approval needed before implementation: no
-- Independent audit required: no
+- Independent audit required: yes
 
 ### Validation Plan
 - Tests to add/update (append to `tests/test_merger_rate.py`):
@@ -810,6 +963,11 @@ context. Summary of the method this plan implements:
     `rate <= 0`, non-finite `rate`, non-finite or non-positive `rate_err`)
     returns `(nan, nan, nan, n_excluded)` with the correct `n_excluded`
     count, and does not raise.
+  - `fit_log_rate_vs_redshift` with exactly 2 usable points plus at least
+    one excluded point returns finite `slope`, `slope_err`, and `intercept`
+    with the correct `n_excluded`, and does not raise; independently
+    compute the expected unscaled two-point covariance so this catches a
+    residual-scaled `numpy.polyfit(..., cov=True)` implementation.
   - `fit_log_rate_vs_redshift` with exactly 2+ usable points that all
     share the same `redshift` value (a rank-deficient/non-distinct-x
     case) returns `(nan, nan, nan, n_excluded)` and does not raise —
@@ -817,11 +975,12 @@ context. Summary of the method this plan implements:
     raise.
   - `fit_log_rate_vs_redshift` raises when `redshifts` contains a value
     `<= -1`, when `redshifts` contains a `nan` or `inf` value, and when the
-    three input arrays have mismatched lengths.
+    three input arrays have mismatched shapes or any input is not 1D.
   - `check_slope_consistency`: a slope within `n_sigma * slope_err` of
     `expected_slope` returns `True`; a slope far outside that range
-    returns `False`; a `nan` slope returns `False`.
-  - End-to-end: after `--generate-test` + `--calc-only`,
+    returns `False`; non-finite slope/slope-error/expected-slope and a
+    non-positive slope error return `False`; invalid `n_sigma` raises.
+  - End-to-end on the isolated shared generated-mock fixture:
     `run_merger_rate_calculation` + `fit_log_rate_vs_redshift` +
     `check_slope_consistency` on the real generated test data, using
     `expected_slope = -config["merger_timescale_alpha"]`: assert
@@ -833,8 +992,30 @@ context. Summary of the method this plan implements:
     fail loudly if the error propagation or rate calculation is wrong.
   - `plot_merger_rate_evolution` runs without error on the real generated
     test data and writes `figures/merger_rate_evolution.png`.
-- Commands to run: `pytest tests/` (0 failed); `python src/pipeline.py
-  --validate --merger-rate` end to end, confirm exit code 0 and that
+  - Plot masking: against a hand-written combined HDF5 fixture containing
+    zero, negative, and non-finite rates/errors plus one wholly unusable
+    mass bin, monkeypatch or inspect Matplotlib calls to prove unusable
+    points are not passed to `errorbar`, then confirm the PNG is still
+    written. Include a valid `N_pairs == 1`-equivalent point with
+    `rate_err == rate` and assert its lower endpoint is clipped to the
+    frozen display floor, its upper error remains unchanged, and the
+    clipping annotation is present. Also exercise an all-unusable fixture
+    and confirm a labeled empty PNG is written without error.
+  - Table labeling: capture `print_merger_rate_table` output for a fixture
+    with one insufficient-data bin and assert it prints "insufficient
+    data" for that bin and explicitly labels slope checks as mock-data
+    recovery of the injected merger-timescale model, not a general
+    production validation; also assert the per-bin fit summary reports
+    `n_excluded`.
+  - CLI contract: patch `sys.argv` and assert `parse_args` accepts
+    `--merger-rate` alone and in combination with each existing mutually
+    exclusive mode; add a focused `main` orchestration test (with the
+    calculation/plot/analysis call sites patched) covering at least the
+    default, `--calc-only --merger-rate`, and `--plot-only --merger-rate`
+    call-order contracts without doing file I/O.
+- Commands to run: `venv/bin/python -m pytest tests/` (0 failed);
+  `venv/bin/python src/pipeline.py --validate --merger-rate` end to end,
+  confirm exit code 0 and that
   `figures/merger_rate_evolution.png` is produced.
 - Manual checks: visually inspect `figures/merger_rate_evolution.png` —
   lines should follow the expected `(1+z)^(-merger_timescale_alpha)` trend
@@ -854,24 +1035,6 @@ context. Summary of the method this plan implements:
 
 ## Next Chat Prompt
 
-Plan file: `docs/MERGER_RATE_PLAN.md`
-Slices or batch this session: Batch A (Slices 1-2)
+Plan file: `/Users/dcroton/Local/git-repos/relative-velocity/docs/MERGER_RATE_PLAN.md`
 
-Read the full plan file first. If a selected slice or batch receipt is incomplete or the plan state is unclear, stop and tell me before coding.
-
-Work on the current feature branch for this plan; if none exists, create one and tell me the name.
-
-Use orchestrator as the controlling skill. Act as the Developer: keep implementation, validation, Git operations, and commits local. Use a read-only Reviewer only for investigation, evidence gathering, the hostile drift-audit skill, and an independent code-review skill pass. If no Reviewer is configured or available, perform Developer self-audit and record that provenance explicitly.
-
-For each selected slice or batch, in plan order:
-1. Restate the frozen contract (authorized surface + non-goals) from the plan.
-2. If any included slice's Risk Flags mark approval-needed, stop and get my approval before coding.
-3. apply the scoped-implementation skill against the selected contract.
-4. apply the drift-audit skill using a read-only Reviewer when available; otherwise perform Developer self-audit. Report the authorization gate result and who performed it before any quality review.
-5. If the gate passes, apply the code-review skill using a read-only Reviewer when available; otherwise perform Developer self-audit through the code-review skill. Record who performed it. If the drift gate fails, fix the drift and re-audit.
-6. Surface drift and review findings to me, fix them, then re-run the relevant gate. If consecutive reviews return only minor findings and have clearly converged record residuals in the slice summary and proceed.
-7. Ask me before committing. On my approval, commit the selected slice or batch with the commit skill.
-
-After the selected slice(s) or batch are committed, use the handoff skill to record state, audit provenance (Reviewer tool/label or Developer self-audit and fallback context), and the next slice or batch to resume from. Do not continue past the selected scope.
-
-Confirm before starting: plan file read, selected slice(s) or batch, branch, and the first slice. Then begin.
+Use the single authoritative Mode B launcher in the `project-manager` skill's `SKILL.md` ("Launcher"), with the repository set to `/Users/dcroton/Local/git-repos/relative-velocity` and a user-selected harness/model. The PM must run Slices 1-3 atomically in plan order; all three are elevated-risk slices requiring fresh PM-commissioned `drift-audit` and `code-review` passes against each slice's exact final commit before acceptance.
