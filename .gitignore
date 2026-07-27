@@ -21,6 +21,9 @@ figures/
 # Claude Code local dir
 .claude/
 
+# Orchestrator delegate-review run artifacts (local, ephemeral)
+.orchestrator/
+
 # macOS
 .DS_Store
 
