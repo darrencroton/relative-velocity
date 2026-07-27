@@ -18,6 +18,9 @@ figures/
 .ipynb_checkpoints/
 *.ipynb
 
+# Claude Code local dir
+.claude/
+
 # macOS
 .DS_Store
 

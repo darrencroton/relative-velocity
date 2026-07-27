@@ -12,25 +12,36 @@ Given a galaxy catalog with positions, velocities, and stellar masses at one or 
 4. Writes pair catalogs to disk
 5. Produces histograms of the relative velocity distribution in each bin
 
+## Setup
+
+```bash
+./setup.sh
+source venv/bin/activate
+```
+
+`setup.sh` checks the Python version, creates a `venv/` virtual environment, and installs `requirements.txt` into it. Re-running it is safe — it reuses an existing `venv/`.
+
+Run all commands below from the repo root (paths like `data/`, `results/`, `figures/` are relative to the working directory, not to `src/`).
+
 ## Quick start
 
 ```bash
 # Generate test data, run calculation, plot with Maxwell-distribution validation overlays
-python pipeline.py --validate
+python src/pipeline.py --validate
 
 # Generate test data then run the full pipeline
-python pipeline.py --generate-test
+python src/pipeline.py --generate-test
 
 # Run calculation only (data/ must exist)
-python pipeline.py --calc-only
+python src/pipeline.py --calc-only
 
 # Remake plots from existing results (no recalculation)
-python pipeline.py --plot-only
+python src/pipeline.py --plot-only
 ```
 
 ## Configuration
 
-All parameters live in `config.py`. Key settings:
+All parameters live in `src/config.py`. Key settings:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -67,3 +78,13 @@ pytest tests/
 - scipy
 - h5py
 - matplotlib
+- pytest
+
+See `requirements.txt` for pinned minimum versions.
+
+## Project layout
+
+- `src/` — pipeline modules (see `docs/PLAN.md` for the architecture and data flow)
+- `tests/` — pytest suite
+- `docs/` — planning and scientific background documents
+- `data/`, `results/`, `figures/` — generated inputs/outputs (gitignored)

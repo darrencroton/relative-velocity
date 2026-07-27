@@ -1,32 +1,53 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding assistants (Claude Code, Codex CLI, etc.) when working with code in this repository.
 
 ## Project Overview
 
-Python pipeline for computing relative velocity statistics of close galaxy pairs from semi-analytic model (SAM) outputs. **Currently in planning phase** — documentation is complete but no source code exists yet.
+Python pipeline for computing relative velocity statistics of close galaxy pairs from semi-analytic model (SAM) outputs. Implemented and tested end-to-end (see `docs/PLAN.md` for the original design and `docs/BACKGROUND.md` for the scientific motivation).
+
+## Repository Layout
+
+```
+src/     pipeline modules (see Architecture below)
+tests/   pytest suite
+docs/    planning and scientific background documents
+data/    input galaxy catalogs — generated, gitignored
+results/ calculation output (pair catalogs) — generated, gitignored
+figures/ output plots — generated, gitignored
+```
+
+## Setup
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Running the Pipeline
 
+Run from the repo root — `data/`, `results/`, `figures/` are resolved relative to the working directory, not to `src/`.
+
 ```bash
 # Generate test data and run full pipeline with Maxwell-distribution validation plots
-python pipeline.py --validate
+python src/pipeline.py --validate
 
 # Run calculation only (writes pair catalogs to results/)
-python pipeline.py --calc-only
+python src/pipeline.py --calc-only
 
 # Remake plots from existing results (no recalculation)
-python pipeline.py --plot-only
+python src/pipeline.py --plot-only
 
 # Generate test data, then run full pipeline
-python pipeline.py --generate-test
+python src/pipeline.py --generate-test
 ```
 
-Requirements: Python 3.8+, numpy, scipy, h5py, matplotlib.
+Requirements: Python 3.8+, numpy, scipy, h5py, matplotlib (see `requirements.txt` for pinned minimum versions).
 
 ## Architecture
 
-Six modules with a strictly linear data flow; no module imports from another except through the pipeline driver.
+Six modules in `src/` with a strictly linear data flow; no module imports from another except through the pipeline driver.
 
 ```
 generate_test_data.py  →  data/ HDF5 files

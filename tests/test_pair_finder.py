@@ -13,7 +13,7 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from pair_finder import find_pairs
 
 # Minimal config used throughout; keep only the fields pair_finder reads.

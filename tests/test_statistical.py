@@ -31,7 +31,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from config import config as DEFAULT_CONFIG
 from generate_test_data import generate_snapshot, SIGMA_V_PER_BIN
 from pair_finder import find_pairs

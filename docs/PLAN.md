@@ -24,16 +24,20 @@
 
 ```
 relative-velocity/
-├── BACKGROUND.md                # physics and methodology reference
-├── PLAN.md                      # this document
+├── docs/
+│   ├── BACKGROUND.md            # physics and methodology reference
+│   └── PLAN.md                  # this document
 │
-├── config.py                    # all parameters and settings
-├── generate_test_data.py        # standalone: creates mock galaxy catalogs
-├── data_reader.py               # modular data I/O (test data now, SAGE later)
-├── pair_finder.py               # KD-tree pair finding + relative velocity calc
-├── calc.py                      # orchestrates calculation, writes results
-├── plot.py                      # reads results, makes histograms
-├── pipeline.py                  # runs calc then plot (or either alone)
+├── src/
+│   ├── config.py                # all parameters and settings
+│   ├── generate_test_data.py    # standalone: creates mock galaxy catalogs
+│   ├── data_reader.py           # modular data I/O (test data now, SAGE later)
+│   ├── pair_finder.py           # KD-tree pair finding + relative velocity calc
+│   ├── calc.py                  # orchestrates calculation, writes results
+│   ├── plot.py                  # reads results, makes histograms
+│   └── pipeline.py              # runs calc then plot (or either alone)
+│
+├── tests/                       # pytest suite
 │
 ├── data/                        # input galaxy catalogs (generated or real)
 │   ├── test_z2.0.hdf5
