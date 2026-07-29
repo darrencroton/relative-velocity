@@ -169,12 +169,23 @@ is sufficient; build no runtime mock-vs-real detection.
 **Binding on implementers and reviewers alike.**
 
 Every function in this plan validates its inputs and fails loud with clear
-`AssertionError`s, per the repo's house style. That obligation covers **malformed
-inputs** — wrong dtype, wrong shape, wrong rank, non-finite where finiteness is
-required, negative counts, complex arrays, values outside a stated domain.
+`AssertionError`s, per the repo's house style. The obligation has two axes, kept
+separate here deliberately: conflating them is what let two reviewers read this
+section to opposite conclusions about the same code.
 
-It does **not** extend to preserving exact behaviour at the extremes of float64
-representability for values no caller in this system can produce. Specifically:
+**Axis 1 — form. Always in scope, and validated before any coercion.** dtype
+(including complex and string), rank, shape, sign where a sign is required, and
+finiteness where finiteness is required. A malformed input must raise
+`AssertionError` *before* the value is coerced: `np.asarray(x, dtype=float)`
+placed ahead of the dtype check silently discards an imaginary part or parses a
+numeric-looking string, and that is a defect of the same severity as no check at
+all. "Numeric" here means a real integer or floating dtype — booleans and complex
+are not numeric, and a function that accepts float64 but rejects an
+integer-valued input is rejecting valid data.
+
+**Axis 2 — magnitude.** Behaviour is specified only inside the declared ranges
+below; outside them it is unspecified. This exemption covers magnitude only and
+never excuses a missing Axis 1 check.
 
 | Quantity | Declared domain |
 |---|---|
@@ -188,11 +199,15 @@ representability for values no caller in this system can produce. Specifically:
 | `rate`, `rate_err` | finite; usability additionally requires `> 0` |
 | `rate_err / rate` | bounded below by `1 / sqrt(N_pairs)` by construction |
 
-**Behaviour outside these ranges is unspecified.** Implementers need not guard
-overflow or underflow of intermediate products for out-of-domain inputs.
-Reviewers must not report out-of-domain behaviour as P0 or P1. Functions may
-still reject such inputs, and where a guard is cheap and clear it is welcome —
-but its absence is not a defect.
+Implementers need not guard overflow or underflow of intermediate products for
+out-of-domain **magnitudes**, and reviewers must not report out-of-domain
+magnitude behaviour as P0 or P1. Functions may still reject such magnitudes, and
+where a guard is cheap and clear it is welcome — but its absence is not a defect.
+
+**A guard that rejects in-domain input is a defect of equal severity to a missing
+guard**, and every rejection message must name the actual reason for the
+rejection. Rejecting an integer where the domain says "finite positive scalar",
+or reporting "must be numeric" for a value that *is* numeric, are both defects.
 
 **The one in-domain exception, which must hold:** for any in-domain input, a bin
 with `sigma_f_pair == 0` must yield `sigma_rate == 0` exactly (point 5).
@@ -665,7 +680,9 @@ Add to `src/merger_rate.py`:
 - No plotting, table, CLI, orchestration, or Matplotlib import in this slice.
 - No hardcoded literature exponent anywhere as ground truth — `expected_slope` is
   always derived from `config["merger_timescale_alpha"]`.
-- No guarding of out-of-domain inputs beyond the Numerical Domain Contract.
+- No guarding of out-of-domain magnitudes beyond the Numerical Domain Contract.
+  (Form validation — dtype, rank, shape, sign, finiteness — is always required;
+  see Axis 1.)
 
 ### Risk Flags
 
