@@ -117,7 +117,7 @@ def find_pairs(catalog, config):
             sep_bin=np.array([], dtype=int),
         )
 
-    idx_i, idx_j = zip(*raw_pairs)
+    idx_i, idx_j = zip(*raw_pairs, strict=True)
     idx_i = np.array(idx_i)
     idx_j = np.array(idx_j)
 

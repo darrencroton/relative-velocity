@@ -113,7 +113,12 @@ def plot_by_mass(all_results, config, validation_mode=False):
     for b in range(n_mass_bins):
         ax = axes_flat[b]
 
-        for z, color in zip(config["redshifts"], Z_COLORS):
+        # Cycle the palette instead of zipping against it: zip would silently
+        # drop every snapshot past the fourth colour, leaving a redshift out of
+        # the figure with no warning. strict=True is wrong here too -- it would
+        # turn any redshift count != len(Z_COLORS) into a crash.
+        for i, z in enumerate(config["redshifts"]):
+            color = Z_COLORS[i % len(Z_COLORS)]
             dv = all_results[z]["delta_v"][all_results[z]["mass_bin"] == b]
             _draw_hist(ax, dv, vel_edges, color, label=f"z = {z:.0f}")
 

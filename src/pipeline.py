@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import sys
 
 from config import config
 

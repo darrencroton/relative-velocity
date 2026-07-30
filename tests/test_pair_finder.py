@@ -327,7 +327,6 @@ class TestMassAssignment:
             log_masses=[9.0, 9.0],
         )
         pairs = find_pairs(cat, cfg)
-        expected_total = np.log10(2 * 10**9.0)  # ≈ 9.301 → bin 1
         assert pairs["mass_bin"][0] == 1
 
     def test_invalid_mass_bin_by_raises(self):

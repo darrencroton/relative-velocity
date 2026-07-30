@@ -23,7 +23,6 @@ of mass selection, velocity computation, or binning logic.
 """
 
 import numpy as np
-import pytest
 import sys
 import os
 

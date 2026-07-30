@@ -8,7 +8,6 @@ re-bin or compute new statistics without re-running the calculation.
 import os
 import datetime
 import h5py
-import numpy as np
 
 from data_reader import load_galaxy_catalog
 from pair_finder import find_pairs
@@ -32,7 +31,7 @@ def _save_pairs(pairs, filepath, z, config):
         # Provenance metadata.
         f.attrs["redshift"]     = z
         f.attrs["n_pairs"]      = len(pairs["delta_v"])
-        f.attrs["timestamp"]    = datetime.datetime.utcnow().isoformat()
+        f.attrs["timestamp"]    = datetime.datetime.now(datetime.timezone.utc).isoformat()
         f.attrs["mass_bin_by"]  = config["mass_bin_by"]
         f.attrs["mass_ratio_min"] = config["mass_ratio_min"]
         f.attrs["max_sep_kpc"]  = config["max_sep"]
