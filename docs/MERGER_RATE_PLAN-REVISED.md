@@ -173,6 +173,16 @@ plan**; it is not a licence to change existing behaviour. In particular
 and `tests/test_pair_finder.py` freezes that, so it stays as it is. Do not
 introduce `TypeError` / `ValueError` raises for new input validation.
 
+> **Binding note added 2026-08-03 (amendment).** A `TypeError` or `ValueError`
+> that *leaks* from an unguarded coercion — `float(attr)` on a vector or a
+> `None` — is **not** a valid rejection, even though it fails loudly. It is the
+> exact failure this clause and *Validate form before coercion* below exist to
+> prevent, so it is a defect wherever the value is one the slice's Acceptance
+> Criteria require it to reject. Where the Criteria do **not** list the input
+> class, its behaviour stays unspecified and no guard is to be added — the two
+> rules do not conflict: this note governs *how* a listed rejection must happen,
+> not *which* inputs are rejected.
+
 Missing-file behaviour is slice-specific: Slice 1's `_load_pair_counts` may raise
 either `FileNotFoundError` or `AssertionError`; Slice 2's preflight must assert.
 
@@ -551,6 +561,22 @@ Add to `src/merger_rate.py`:
     `(nan, nan, nan, n_excluded)`** rather than failing or fabricating a fit. This
     is a data condition, not malformed input, so it must not raise.
 
+  > **Binding note added 2026-08-03 (amendment).** "Distinct redshifts" above
+  > means **distinct in the formed predictor**, not merely distinct as float64
+  > `z`. Two redshifts can differ and still produce the same `log10(1 + z)` — for
+  > example `z = 1.0` and `np.nextafter(1.0, 2.0)`, whose `1 + z` both round to
+  > `2.0`. Apply the distinctness test to the usable points' computed
+  > `log10(1 + z)` values: if fewer than 2 of them are distinct, **return
+  > `(nan, nan, nan, n_excluded)`**. It must not raise, and it must not fabricate
+  > a finite slope from rounding residue.
+  >
+  > Test distinctness on the formed predictor values themselves, before any
+  > centring — comparing them is exact, whereas a centred residual is not
+  > reliably zero for identical inputs, since a weighted mean of a constant array
+  > need not round back to that constant. No minimum separation threshold is
+  > specified and none is to be invented: two distinct predictor values, however
+  > close, are a fit; one value is this branch.
+
   `slope_err` must be the **unscaled** weighted-least-squares parameter error,
   computed from the supplied `sigma_log_rate` as true measurement errors. Do not
   use residual-based rescaling (`scipy.optimize.curve_fit` without
@@ -566,6 +592,16 @@ Add to `src/merger_rate.py`:
   before accumulating, then restore the absolute covariance scale. Returns
   `(slope, slope_err, intercept, n_excluded)`. **This function has no knowledge
   of mass bins**; the caller loops over them.
+
+  > **Binding note added 2026-08-03 (amendment).** Centre **both** variables, not
+  > just the predictor: accumulate the cross term as
+  > `sum(w * x_centred * (y - y_weighted_mean))`. This is algebraically identical
+  > to using an uncentred `y`, but the two differ in float64 by a term
+  > proportional to `y`'s absolute offset, so an uncentred `y` amplifies the
+  > predictor's rounding residue by that offset and biases the slope of a
+  > barely-resolved predictor. The collapsed case is already handled by the
+  > branch above; this is the adjacent numerical-hygiene requirement, and it is
+  > what "numerically stable form" means here.
 
 - `check_slope_consistency(slope, slope_err, expected_slope, n_sigma=3.0)` —
   returns `True` if `abs(slope - expected_slope) < n_sigma * slope_err`, else
@@ -600,6 +636,16 @@ Add to `src/merger_rate.py`:
   Other out-of-domain behaviour, including intermediate overflow at extreme
   magnitudes, is unspecified. `run_merger_rate_validation` additionally reads
   `os.path.join(config["results_dir"], "merger_rate.hdf5")` as written by Slice 2.
+
+  > **Binding note added 2026-08-03 (amendment).** Two finite redshifts `> -1`
+  > whose separation is too small to survive `log10(1 + z)` are **in** the
+  > declared domain, and the collapsed-predictor rule in the Intended Change
+  > governs them: return `(nan, nan, nan, n_excluded)`. No exact slope is
+  > specified for such inputs and none is required — a fit through a collapsed
+  > predictor is not meaningful, so there is nothing here for a reviewer to mine
+  > as an unmet exactness criterion. The "finite fit" requirement for the
+  > exactly-two-usable-points case applies whenever the two formed predictor
+  > values are distinct, which covers every pinned fixture in this slice.
 - **Outputs:** `fit_log_rate_vs_redshift`, `check_slope_consistency`, and
   `run_merger_rate_validation` importable and independently callable; the console
   summary; and a returned list of per-bin result dicts, each having exactly the
